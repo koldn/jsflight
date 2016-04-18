@@ -1,23 +1,25 @@
 package com.focusit.jsflight.player.scenario;
 
-import com.focusit.jsflight.player.constants.EventType;
-import com.focusit.jsflight.player.controller.DuplicateHandlerController;
-import com.focusit.jsflight.player.input.Events;
-import com.focusit.jsflight.player.input.FileInput;
-import com.focusit.jsflight.player.script.PlayerScriptProcessor;
-import com.focusit.jsflight.player.webdriver.SeleniumDriver;
-import com.focusit.script.jmeter.JMeterJSFlightBridge;
-import com.focusit.script.player.PlayerContext;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.openqa.selenium.WebElement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
+import com.focusit.jsflight.player.constants.EventType;
+import com.focusit.jsflight.player.controller.DuplicateHandlerController;
+import com.focusit.jsflight.player.controller.WebLookupController;
+import com.focusit.jsflight.player.input.Events;
+import com.focusit.jsflight.player.input.FileInput;
+import com.focusit.jsflight.player.script.PlayerScriptProcessor;
+import com.focusit.jsflight.player.webdriver.SeleniumDriver;
+import com.focusit.script.jmeter.JMeterJSFlightBridge;
+import com.focusit.script.player.PlayerContext;
 
 /**
  * Recorded scenario encapsulation: parses file, plays the scenario by step, modifies the scenario, saves to a disk
@@ -110,6 +112,10 @@ public class UserScenario
             {
                 switch (type)
                 {
+                case EventType.SCRIPT:
+                    new PlayerScriptProcessor().executeWebLookupScript(WebLookupController.getInstance().getScript(),
+                            null, target, event);
+                    break;
                 case EventType.MOUSEWHEEL:
                     SeleniumDriver.processMouseWheel(event, target);
                     break;
@@ -207,7 +213,8 @@ public class UserScenario
     {
         JSONObject prev = getPrevEvent(event);
 
-        if (prev != null && new PlayerScriptProcessor().executeDuplicateHandlerScript(DuplicateHandlerController.getInstance().getScriptBody(), event, prev))
+        if (prev != null && new PlayerScriptProcessor()
+                .executeDuplicateHandlerScript(DuplicateHandlerController.getInstance().getScriptBody(), event, prev))
         {
             return true;
         }

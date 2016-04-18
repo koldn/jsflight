@@ -1,21 +1,24 @@
 package com.focusit.jsflight.player.script;
 
-import com.focusit.jsflight.player.scenario.UserScenario;
-import com.focusit.script.ScriptEngine;
-import com.focusit.script.player.PlayerContext;
-import groovy.lang.Binding;
-import groovy.lang.Script;
-import groovy.text.SimpleTemplateEngine;
-import org.json.JSONObject;
-import org.openqa.selenium.WebDriver;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.json.JSONObject;
+import org.openqa.selenium.WebDriver;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.focusit.jsflight.player.constants.EventConstants.ScriptEvent;
+import com.focusit.jsflight.player.scenario.UserScenario;
+import com.focusit.script.ScriptEngine;
+import com.focusit.script.player.PlayerContext;
+
+import groovy.lang.Binding;
+import groovy.lang.Script;
+import groovy.text.SimpleTemplateEngine;
 
 /**
  * PlayerScriptProcessor that runs groovy scripts or GString templates
@@ -46,6 +49,14 @@ public class PlayerScriptProcessor
         Script scr = ScriptEngine.getInstance().getScript(script);
         scr.setBinding(binding);
         return (boolean)scr.run();
+    }
+
+    public void executeEventScript(JSONObject event)
+    {
+        Binding binding = new Binding();
+        binding.setVariable("id", event.getString(ScriptEvent.ID));
+        binding.setVariable(ScriptEvent.METHOD, event.getString(ScriptEvent.METHOD));
+        binding.setVariable(ScriptEvent.PROPERTIES, event.getJSONObject(ScriptEvent.PROPERTIES));
     }
 
     public Object executeWebLookupScript(String script, WebDriver wd, String target, JSONObject event)
