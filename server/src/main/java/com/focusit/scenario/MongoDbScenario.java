@@ -2,6 +2,9 @@ package com.focusit.scenario;
 
 import org.bson.types.ObjectId;
 import org.json.JSONObject;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 
 import com.focusit.jsflight.player.config.Configuration;
 import com.focusit.jsflight.player.scenario.UserScenario;
@@ -32,65 +35,6 @@ public class MongoDbScenario extends UserScenario
         return experiment.getConfiguration();
     }
 
-    @Override
-    public int getPosition()
-    {
-        return experiment.getPosition();
-    }
-
-    @Override
-    public int getStepsCount()
-    {
-        return experiment.getSteps();
-    }
-
-    @Override
-    public JSONObject getStepAt(int position)
-    {
-        //        Page<Event> page = repository.findOneByRecordingId(new ObjectId(experiment.getRecordingId()),
-        //                new PageRequest(position, 1, new Sort(Sort.Direction.ASC, "timestamp")));
-        //        Event event = page.getContent().get(0);
-        Event event = repository.findOneByRecordingIdOrderByTimestampDesc(new ObjectId(experiment.getRecordingId()));
-        JSONObject object = new JSONObject(event);
-        return object;
-    }
-
-    @Override
-    public void next()
-    {
-        setPosition(getPosition() + 1);
-        if (getPosition() == getStepsCount())
-        {
-            setPosition(0);
-        }
-    }
-
-    @Override
-    public String getScenarioFilename()
-    {
-        return getRecordingName();
-    }
-
-    public String getRecordingId()
-    {
-        return experiment.getRecordingId();
-    }
-
-    public String getRecordingName()
-    {
-        return experiment.getRecordingName();
-    }
-
-    public String getTag()
-    {
-        return experiment.getTag();
-    }
-
-    public String getTagHash()
-    {
-        return experiment.getTagHash();
-    }
-
     public String getExperimentId()
     {
         return experiment.getId();
@@ -106,9 +50,68 @@ public class MongoDbScenario extends UserScenario
         return experiment.getLimit();
     }
 
+    @Override
+    public int getPosition()
+    {
+        return experiment.getPosition();
+    }
+
     public int getProxyPort()
     {
         return Integer.parseInt(experiment.getConfiguration().getCommonConfiguration().getProxyPort());
+    }
+
+    public String getRecordingId()
+    {
+        return experiment.getRecordingId();
+    }
+
+    public String getRecordingName()
+    {
+        return experiment.getRecordingName();
+    }
+
+    @Override
+    public String getScenarioFilename()
+    {
+        return getRecordingName();
+    }
+
+    @Override
+    public JSONObject getStepAt(int position)
+    {
+        Page<Event> page = repository.findOneByRecordingId(new ObjectId(experiment.getRecordingId()),
+                new PageRequest(position, 1, new Sort(Sort.Direction.ASC, "timestamp")));
+        Event event = page.getContent().get(0);
+        //        Event event = repository.findOneByRecordingIdOrderByTimestampDesc(new ObjectId(experiment.getRecordingId()));
+        JSONObject object = new JSONObject(event);
+        return object;
+    }
+
+    @Override
+    public int getStepsCount()
+    {
+        return experiment.getSteps();
+    }
+
+    public String getTag()
+    {
+        return experiment.getTag();
+    }
+
+    public String getTagHash()
+    {
+        return experiment.getTagHash();
+    }
+
+    @Override
+    public void next()
+    {
+        setPosition(getPosition() + 1);
+        if (getPosition() == getStepsCount())
+        {
+            setPosition(0);
+        }
     }
 
     @Override
