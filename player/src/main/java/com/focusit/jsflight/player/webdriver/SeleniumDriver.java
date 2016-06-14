@@ -18,6 +18,7 @@ import org.openqa.selenium.interactions.Actions;
 import org.openqa.selenium.phantomjs.PhantomJSDriver;
 import org.openqa.selenium.remote.CapabilityType;
 import org.openqa.selenium.remote.DesiredCapabilities;
+import org.openqa.selenium.remote.RemoteWebElement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,15 +31,20 @@ import com.google.common.collect.Lists;
 
 /**
  * Selenium webdriver proxy: runs a browser, sends events, make screenshots
- * 
+ *
  * @author Denis V. Kirpichenkov
  *
  */
 public class SeleniumDriver
 {
 
+    /**
+     * Non operational element indicating step processing must be aborted
+     * returned from weblookup script
+     */
+    public static final RemoteWebElement NO_OP_ELEMENT = new RemoteWebElement();
     private static final Logger LOG = LoggerFactory.getLogger(SeleniumDriver.class);
-    private HashMap<String, WebDriver> drivers = new HashMap<>();
+    private static HashMap<String, WebDriver> drivers = new HashMap<>();
     /**
      * Using BiMap for removing entries by value, because tabUuids and Windowhandles are unique
      */
@@ -46,6 +52,12 @@ public class SeleniumDriver
     private Map<String, String> lastUrls = new HashMap<>();
     private StringGenerator stringGen;
     private UserScenario scenario;
+    private int pageTimeoutMs;
+    private String checkPageJs;
+    private String lookupScript;
+    private String maxElementGroovy;
+    private String uiShownScript;
+    private boolean useRandomChars;
 
     public SeleniumDriver(UserScenario scenario)
     {
@@ -56,6 +68,38 @@ public class SeleniumDriver
     {
         this.scenario = scenario;
         this.lastUrls = externalLastUrls;
+        //This must be set due to equals of WebElement
+        NO_OP_ELEMENT.setId("NO_OP");
+    }
+
+    public void setUseRandomChars(boolean useRandomChars)
+    {
+        this.useRandomChars = useRandomChars;
+    }
+
+    public void setPageTimeoutMs(int pageTimeoutMs)
+    {
+        this.pageTimeoutMs = pageTimeoutMs;
+    }
+
+    public void setCheckPageJs(String checkPageJs)
+    {
+        this.checkPageJs = checkPageJs;
+    }
+
+    public void setLookupScript(String lookupScript)
+    {
+        this.lookupScript = lookupScript;
+    }
+
+    public void setUiShownScript(String uiShownScript)
+    {
+        this.uiShownScript = uiShownScript;
+    }
+
+    public void setMaxElementGroovy(String maxElementGroovy)
+    {
+        this.maxElementGroovy = maxElementGroovy;
     }
 
     public void closeWebDrivers()
@@ -63,18 +107,10 @@ public class SeleniumDriver
         drivers.values().forEach(WebDriver::close);
     }
 
-    public WebElement findTargetWebElement(String script, WebDriver wd, JSONObject event, String target)
+    public WebElement findTargetWebElement(WebDriver wd, JSONObject event, String target)
     {
-        try
-        {
-            LOG.info("looking for " + target);
-            return wd.findElement(By.xpath(target));
-        }
-        catch (NoSuchElementException e)
-        {
-            LOG.info("failed looking for {}. trying to restore xpath");
-            return (WebElement)new PlayerScriptProcessor(scenario).executeWebLookupScript(script, wd, target, event);
-        }
+        waitPageReady(wd, event);
+        return (WebElement)new PlayerScriptProcessor(scenario).executeWebLookupScript(lookupScript, wd, target, event);
     }
 
     public WebDriver getDriverForEvent(JSONObject event, boolean firefox, String path, String display, String proxyHost,
@@ -138,6 +174,7 @@ public class SeleniumDriver
                     driver = new PhantomJSDriver(cap);
                 }
             }
+            driver = WebDriverWrapper.wrap(driver);
             drivers.put(tag, driver);
             return driver;
         }
@@ -192,8 +229,7 @@ public class SeleniumDriver
         outputStream.write(shot);
     }
 
-    public void openEventUrl(WebDriver wd, JSONObject event, int pageTimeoutMs, String checkPageJs,
-            String uiShownScript)
+    public void openEventUrl(WebDriver wd, JSONObject event)
     {
         String event_url = event.getString("url");
 
@@ -203,15 +239,35 @@ public class SeleniumDriver
             wd.get(event_url);
 
             waitUiShow(uiShownScript, wd);
-            waitPageReady(wd, event, pageTimeoutMs, checkPageJs);
+            waitPageReady(wd, event);
             updateLastUrl(event, event_url);
         }
     }
 
-    public void processKeyboardEvent(WebDriver wd, JSONObject event, WebElement element, boolean useRandomChars)
-            throws UnsupportedEncodingException
+    public void processKeyboardEvent(WebDriver wd, JSONObject event) throws UnsupportedEncodingException
     {
+        WebElement element = findTargetWebElement(wd, event, scenario.getTargetForEvent(event));
+        if (element.equals(NO_OP_ELEMENT))
+        {
+            LOG.warn("Non operational element returned. Aborting event processing. Target xpath {}",
+                    event.getString("target2"));
+            return;
+        }
         ensureStringGeneratorInitialized(useRandomChars);
+
+        //TODO remove this when recording of cursor in text box is implemented
+        if (skipKeyboardForElement(element))
+        {
+            LOG.warn("Keyboard processing for non empty Date is disabled");
+            return;
+        }
+
+        //Before processing keyboard events focus MUST be on the browser window, otherwise there is no
+        //guaranties for correct processing.
+        //Firefox ignores all fired events when window is not in focus
+        //Selenium uses dark magic to deal with it
+        wd.switchTo().window(wd.getWindowHandle());
+
         if (event.getString("type").equalsIgnoreCase(EventType.KEY_PRESS))
         {
             if (event.has("charCode"))
@@ -220,7 +276,10 @@ public class SeleniumDriver
                 String keys = stringGen.getAsString(ch);
                 if (!element.getTagName().contains("iframe"))
                 {
-                    element.sendKeys(keys);
+                    String prevText = element.getAttribute("value");
+                    element.clear();
+                    element.sendKeys(prevText + keys);
+
                 }
                 else
                 {
@@ -257,7 +316,7 @@ public class SeleniumDriver
                     case 27:
                         element.sendKeys(Keys.ESCAPE);
                         break;
-                    case 127:
+                    case 46:
                         element.sendKeys(Keys.DELETE);
                         break;
                     case 13:
@@ -283,8 +342,15 @@ public class SeleniumDriver
         }
     }
 
-    public void processMouseEvent(WebDriver wd, JSONObject event, WebElement element)
+    public void processMouseEvent(WebDriver wd, JSONObject event)
     {
+        WebElement element = findTargetWebElement(wd, event, scenario.getTargetForEvent(event));
+        if (element.equals(NO_OP_ELEMENT))
+        {
+            LOG.warn("Non operational element returned. Aborting event processing. Target xpath {}",
+                    event.getString("target2"));
+            return;
+        }
         ensureElementInWindow(wd, element);
         if (element.isDisplayed())
         {
@@ -340,16 +406,22 @@ public class SeleniumDriver
         }
     }
 
-    public void processMouseWheel(String script, WebDriver wd, JSONObject event, String target)
+    public void processMouseWheel(WebDriver wd, JSONObject event, String target)
     {
         if (!event.has("deltaY"))
         {
             LOG.error("event has no deltaY - cant process scroll", new Exception());
             return;
         }
-        WebElement el = (WebElement)new PlayerScriptProcessor(scenario).executeWebLookupScript(script, wd, target,
+        WebElement el = (WebElement)new PlayerScriptProcessor(scenario).executeWebLookupScript(lookupScript, wd, target,
                 event);
-        //Web lookup script MUST return /html element if scroll occurs not in a popup
+        if (el.equals(NO_OP_ELEMENT))
+        {
+            LOG.warn("Non operational element returned. Aborting event processing. Target xpath {}",
+                    event.getString("target2"));
+            return;
+        }
+        //Web lookup script MUST return //body element if scroll occurs not in a popup
         if (!el.getTagName().equalsIgnoreCase("html"))
         {
             ((JavascriptExecutor)wd).executeScript("arguments[0].scrollTop = arguments[0].scrollTop + arguments[1]", el,
@@ -361,8 +433,7 @@ public class SeleniumDriver
         }
     }
 
-    public void processScroll(WebDriver wd, JSONObject event, String target, int pageTimeoutMs, String checkPageJs,
-            String getMaxElementGroovy)
+    public void processScroll(WebDriver wd, JSONObject event, String target)
     {
         long timeout = System.currentTimeMillis() + 20000l;
         if (checkElementPresent(wd, target))
@@ -371,11 +442,11 @@ public class SeleniumDriver
         }
         do
         {
-            waitPageReady(wd, event, pageTimeoutMs, checkPageJs);
+            waitPageReady(wd, event);
             // TODO WebLookup script must return the element
             try
             {
-                WebElement el = getMax(wd, getMaxElementGroovy);
+                WebElement el = getMax(wd, maxElementGroovy);
                 scroll((JavascriptExecutor)wd, el);
                 if (checkElementPresent(wd, target))
                 {
@@ -448,7 +519,7 @@ public class SeleniumDriver
         lastUrls.put(scenario.getTagForEvent(event), url);
     }
 
-    public void waitPageReady(WebDriver wd, JSONObject event, int pageTimeoutMs, String checkPageJs)
+    public void waitPageReady(WebDriver wd, JSONObject event)
     {
         String type = event.getString("type");
         if (type.equalsIgnoreCase(EventType.XHR) || type.equalsIgnoreCase(EventType.SCRIPT))
@@ -538,6 +609,12 @@ public class SeleniumDriver
         }
     }
 
+    private boolean skipKeyboardForElement(WebElement element)
+    {
+        return !element.getAttribute("value").isEmpty()
+                && (element.getAttribute("class").contains("date") || element.getAttribute("id").contains("date"));
+    }
+
     private WebElement getMax(WebDriver wd, String script)
     {
         return (WebElement)new PlayerScriptProcessor(scenario).executeWebLookupScript(script, wd, null, null);
@@ -617,7 +694,7 @@ public class SeleniumDriver
         @Override
         public String getAsString(char ch) throws UnsupportedEncodingException
         {
-            return new String(new byte[] { (byte)ch }, StandardCharsets.UTF_8);
+            return String.valueOf(ch);
         }
 
     }
